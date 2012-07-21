@@ -978,6 +978,12 @@ public:
     else
       return default_policy;
   }
+  Policy& get_mutable_policy(int t) {
+    if (policy_map.count(t))
+      return policy_map[t];
+    else
+      return default_policy;
+  }
 
   /**
    * This function is used by the dispatch thread. It runs continuously
