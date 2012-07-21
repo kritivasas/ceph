@@ -213,6 +213,13 @@ public:
    */
   virtual void set_policy(int type, Policy p) = 0;
   /**
+   * Get the Policy associated with a type of peer.
+   * @param t The peer type to get the default policy for.
+   *
+   * @return A const Policy reference.
+   */
+  virtual const Policy& get_policy(int t) = 0;
+  /**
    * Set a Throttler which is applied to all Messages from the given
    * type of peer.
    * This is an init-time function and cannot be called after calling
