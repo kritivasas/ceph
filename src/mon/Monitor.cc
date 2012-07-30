@@ -336,8 +336,12 @@ int Monitor::init()
       keyring.encode_plaintext(bl);
       store->put_bl_ss(bl, "keyring", NULL);
     } else {
-      derr << "unable to load initial keyring " << g_conf->keyring << dendl;
-      return r;
+      if (!auth_supported.is_supported_auth(CEPH_AUTH_CEPHX)) {
+	dout(10) << "cephx auth not supported, tolerating missing keyring" << dendl;
+      } else {
+	derr << "unable to load initial keyring " << g_conf->keyring << dendl;
+	return r;
+      }
     }
   }
 
