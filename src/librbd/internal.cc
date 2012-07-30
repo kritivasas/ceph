@@ -1985,6 +1985,9 @@ namespace librbd {
 
       bufferlist bl;
       bl.append(buf + total_write, write_len);
+      ostringstream oss;
+      bl.hexdump(oss);
+      ldout(cct, 20) << "write buf = " << oss.str() << dendl;
       if (ictx->object_cacher) {
 	// may block
 	ictx->write_to_cache(oid, bl, write_len, block_ofs);
@@ -2129,6 +2132,8 @@ namespace librbd {
     int total_read = 0;
     uint64_t start_block = get_block_num(ictx->order, off);
     uint64_t end_block = get_block_num(ictx->order, off + len - 1);
+    ldout(ictx->cct, 20) << "off + len - 1 = " << off + len - 1
+			 << " end_block = " << end_block << dendl;
     uint64_t block_size = get_block_size(ictx->order);
     ictx->snap_lock.Lock();
     snap_t snap_id = ictx->snap_id;

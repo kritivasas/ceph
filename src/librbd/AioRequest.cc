@@ -81,6 +81,8 @@ namespace librbd {
   int AioRead::send() {
     librados::AioCompletion *rados_completion =
       librados::Rados::aio_create_completion(this, rados_req_cb, NULL);
+    ldout(m_ictx->cct, 20) << "rados_completion = " << rados_completion
+			   << " this = " << this << dendl;
     int r;
     if (m_sparse) {
       r = m_ioctx.aio_sparse_read(m_oid, rados_completion, &m_ext_map,
@@ -181,6 +183,8 @@ namespace librbd {
   int AbstractWrite::send() {
     librados::AioCompletion *rados_completion =
       librados::Rados::aio_create_completion(this, NULL, rados_req_cb);
+    ldout(m_ictx->cct, 20) << "rados_completion = " << rados_completion
+			   << " this = " << this << dendl;
     int r;
     if (m_state == LIBRBD_AIO_WRITE_CHECK_EXISTS) {
       assert(m_read.size());
