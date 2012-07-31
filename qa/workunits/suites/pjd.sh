@@ -2,7 +2,7 @@
 
 set -e
 
-wget http://ceph.newdream.net/qa/pjd.tgz
+wget http://ceph.com/qa/pjd.tgz
 tar zxvf pjd*.tgz
 cd pjd*
 make
@@ -10,7 +10,7 @@ cd ..
 mkdir tmp
 cd tmp
 # must be root!
-sudo prove -r -v ../pjd*/tests
+sudo prove -r -v --exec 'bash -x' ../pjd*/tests
 cd ..
 rm -r tmp pjd*
 

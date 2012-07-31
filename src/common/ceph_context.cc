@@ -22,6 +22,8 @@
 #include "common/debug.h"
 #include "common/HeartbeatMap.h"
 #include "common/errno.h"
+#include "common/lockdep.h"
+#include "common/Formatter.h"
 #include "log/Log.h"
 
 #include <iostream>
@@ -170,48 +172,55 @@ void CephContext::do_command(std::string command, std::string args, bufferlist *
 	   command == "perf schema") {
     _perf_counters_collection->write_json_to_buf(*out, true);
   }
-  else if (command == "config show") {
-    ostringstream ss;
-    _conf->show_config(ss);
-    out->append(ss.str());
-  }
-  else if (command == "config set ") {
-    std::string var = args;
-    size_t pos = var.find(' ');
-    if (pos == string::npos) {
-      out->append("set_config syntax is 'set_config <var> <value>'");
-    } else {
-      std::string val = var.substr(pos+1);
-      var.resize(pos);
-      std::vector<const char*> args;
-      int r = _conf->set_val(var.c_str(), val.c_str());
-      ostringstream ss;
-      if (r < 0) {
-	ss << "error setting '" << var << "' to '" << val << "': " << cpp_strerror(r);
-      } else {
-	_conf->apply_changes(&ss);
-      }
-      out->append(ss.str());
-    }
-  }
-  else if (command == "log flush") {
-    _log->flush();
-  }
-  else if (command == "log dump") {
-    _log->dump_recent();
-  }
-  else if (command == "log reopen") {
-    _log->reopen_log_file();
-  }
   else {
-    assert(0 == "registered under wrong command?");    
+    JSONFormatter jf(true);
+    jf.open_object_section(command.c_str());
+    if (command == "config show") {
+      _conf->show_config(&jf);
+    }
+    else if (command == "config set") {
+      std::string var = args;
+      size_t pos = var.find(' ');
+      if (pos == string::npos) {
+	jf.dump_string("error", "set_config syntax is 'set_config <var> <value>'");
+      } else {
+	std::string val = var.substr(pos+1);
+	var.resize(pos);
+	std::vector<const char*> args;
+	int r = _conf->set_val(var.c_str(), val.c_str());
+	if (r < 0) {
+	  jf.dump_stream("error") << "error setting '" << var << "' to '" << val << "': " << cpp_strerror(r);
+	} else {
+	  ostringstream ss;
+	  _conf->apply_changes(&ss);
+	  jf.dump_string("success", ss.str());
+	}
+      }
+    }
+    else if (command == "log flush") {
+      _log->flush();
+    }
+    else if (command == "log dump") {
+      _log->dump_recent();
+    }
+    else if (command == "log reopen") {
+      _log->reopen_log_file();
+    }
+    else {
+      assert(0 == "registered under wrong command?");    
+    }
+    ostringstream ss;
+    jf.close_section();
+    jf.flush(ss);
+    out->append(ss.str());
   }
   lgeneric_dout(this, 1) << "do_command '" << command << "' '" << args << "' result is " << out->length() << " bytes" << dendl;
 };
 
 
 CephContext::CephContext(uint32_t module_type_)
-  : _conf(new md_config_t()),
+  : nref(1),
+    _conf(new md_config_t()),
     _log(NULL),
     _module_type(module_type_),
     _service_thread(NULL),
@@ -249,6 +258,10 @@ CephContext::CephContext(uint32_t module_type_)
 
 CephContext::~CephContext()
 {
+  if (_conf->lockdep) {
+    lockdep_unregister_ceph_context(this);
+  }
+
   join_service_thread();
 
   _admin_socket->unregister_command("perfcounters_dump");
@@ -263,6 +276,7 @@ CephContext::~CephContext()
   _admin_socket->unregister_command("log dump");
   _admin_socket->unregister_command("log reopen");
   delete _admin_hook;
+  delete _admin_socket;
 
   delete _heartbeat_map;
 

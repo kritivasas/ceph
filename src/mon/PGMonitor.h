@@ -96,6 +96,7 @@ private:
   bool register_new_pgs();
 
   void send_pg_creates();
+  void send_pg_creates(int osd, Connection *con);
 
   /**
    * check pgs for down primary osds
@@ -135,6 +136,8 @@ public:
   void check_full_osd_health(list<pair<health_status_t,string> >& summary,
 			     list<pair<health_status_t,string> > *detail,
 			     const set<int>& s, const char *desc, health_status_t sev) const;
+
+  void check_sub(Subscription *sub);
 
 private:
   // no copying allowed

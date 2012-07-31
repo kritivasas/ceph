@@ -22,6 +22,7 @@
 #include "common/version.h"
 #include "include/str_list.h"
 #include "include/types.h"
+#include "include/stringify.h"
 #include "msg/msg_types.h"
 #include "osd/osd_types.h"
 
@@ -174,7 +175,9 @@ void md_config_t::remove_observer(md_config_obs_t* observer_)
 }
 
 int md_config_t::parse_config_files(const char *conf_files,
-				    std::deque<std::string> *parse_errors, int flags)
+				    std::deque<std::string> *parse_errors,
+				    std::ostream *warnings,
+				    int flags)
 {
   Mutex::Locker l(lock);
   if (internal_safe_to_start_threads)
@@ -192,20 +195,22 @@ int md_config_t::parse_config_files(const char *conf_files,
   }
   std::list<std::string> cfl;
   get_str_list(conf_files, cfl);
-  return parse_config_files_impl(cfl, parse_errors);
+  return parse_config_files_impl(cfl, parse_errors, warnings);
 }
 
 int md_config_t::parse_config_files_impl(const std::list<std::string> &conf_files,
-					 std::deque<std::string> *parse_errors)
+					 std::deque<std::string> *parse_errors,
+					 std::ostream *warnings)
 {
-  Mutex::Locker l(lock);
+  assert(lock.is_locked());
+
   // open new conf
   list<string>::const_iterator c;
   for (c = conf_files.begin(); c != conf_files.end(); ++c) {
     cf.clear();
     string fn = *c;
     expand_meta(fn);
-    int ret = cf.parse_file(fn.c_str(), parse_errors);
+    int ret = cf.parse_file(fn.c_str(), parse_errors, warnings);
     if (ret == 0)
       break;
     else if (ret != -ENOENT)
@@ -215,11 +220,11 @@ int md_config_t::parse_config_files_impl(const std::list<std::string> &conf_file
     return -EINVAL;
 
   std::vector <std::string> my_sections;
-  get_my_sections(my_sections);
+  _get_my_sections(my_sections);
   for (int i = 0; i < NUM_CONFIG_OPTIONS; i++) {
     config_option *opt = &config_optionsp[i];
     std::string val;
-    int ret = get_val_from_conf_file(my_sections, opt->name, val, false);
+    int ret = _get_val_from_conf_file(my_sections, opt->name, val, false);
     if (ret == 0) {
       set_val_impl(val.c_str(), opt);
     }
@@ -230,7 +235,7 @@ int md_config_t::parse_config_files_impl(const std::list<std::string> &conf_file
     std::string as_option("debug_");
     as_option += subsys.get_name(o);
     std::string val;
-    int ret = get_val_from_conf_file(my_sections, as_option.c_str(), val, false);
+    int ret = _get_val_from_conf_file(my_sections, as_option.c_str(), val, false);
     if (ret == 0) {
       int log, gather;
       int r = sscanf(val.c_str(), "%d/%d", &log, &gather);
@@ -282,23 +287,45 @@ void md_config_t::parse_env()
 void md_config_t::show_config(std::ostream& out)
 {
   Mutex::Locker l(lock);
-  _show_config(out);
+  _show_config(&out, NULL);
 }
 
-void md_config_t::_show_config(std::ostream& out)
+void md_config_t::show_config(Formatter *f)
 {
-  out << "name = " << name << std::endl;
-  out << "cluster = " << cluster << std::endl;
+  Mutex::Locker l(lock);
+  _show_config(NULL, f);
+}
+
+void md_config_t::_show_config(std::ostream *out, Formatter *f)
+{
+  if (out) {
+    *out << "name = " << name << std::endl;
+    *out << "cluster = " << cluster << std::endl;
+  }
+  if (f) {
+    f->dump_string("name", stringify(name));
+    f->dump_string("cluster", cluster);
+  }
   for (int o = 0; o < subsys.get_num(); o++) {
-    out << "debug_" << subsys.get_name(o)
-	<< " = " << subsys.get_log_level(o)
-	<< "/" << subsys.get_gather_level(o) << std::endl;
+    if (out)
+      *out << "debug_" << subsys.get_name(o)
+	   << " = " << subsys.get_log_level(o)
+	   << "/" << subsys.get_gather_level(o) << std::endl;
+    if (f) {
+      ostringstream ss;
+      ss << subsys.get_log_level(o)
+	 << "/" << subsys.get_gather_level(o);
+      f->dump_string(subsys.get_name(o).c_str(), ss.str());
+    }
   }
   for (int i = 0; i < NUM_CONFIG_OPTIONS; i++) {
     config_option *opt = config_optionsp + i;
     char *buf;
     _get_val(opt->name, &buf, -1);
-    out << opt->name << " = " << buf << std::endl;
+    if (out)
+      *out << opt->name << " = " << buf << std::endl;
+    if (f)
+      f->dump_string(opt->name, buf);
   }
 }
 
@@ -326,7 +353,7 @@ int md_config_t::parse_argv(std::vector<const char*>& args)
     }
     else if (ceph_argparse_flag(args, i, "--show_config", (char*)NULL)) {
       expand_all_meta();
-      _show_config(cout);
+      _show_config(&cout, NULL);
       _exit(0);
     }
     else if (ceph_argparse_witharg(args, i, &val, "--show_config_value", (char*)NULL)) {
@@ -433,7 +460,7 @@ int md_config_t::parse_option(std::vector<const char*>& args,
       } else {
 	std::string no("--no-");
 	no += opt->name;
-	if (ceph_argparse_flag(args, i, &res, no.c_str(), (char*)NULL)) {
+	if (ceph_argparse_flag(args, i, no.c_str(), (char*)NULL)) {
 	  set_val_impl("false", opt);
 	  break;
 	}
@@ -736,6 +763,12 @@ int md_config_t::_get_val(const char *key, char **buf, int len) const
 void md_config_t::get_my_sections(std::vector <std::string> &sections) const
 {
   Mutex::Locker l(lock);
+  _get_my_sections(sections);
+}
+
+void md_config_t::_get_my_sections(std::vector <std::string> &sections) const
+{
+  assert(lock.is_locked());
   sections.push_back(name.to_str());
 
   sections.push_back(name.get_type_name());
@@ -758,6 +791,13 @@ int md_config_t::get_val_from_conf_file(const std::vector <std::string> &section
 		    const char *key, std::string &out, bool emeta) const
 {
   Mutex::Locker l(lock);
+  return _get_val_from_conf_file(sections, key, out, emeta);
+}
+
+int md_config_t::_get_val_from_conf_file(const std::vector <std::string> &sections,
+					 const char *key, std::string &out, bool emeta) const
+{
+  assert(lock.is_locked());
   std::vector <std::string>::const_iterator s = sections.begin();
   std::vector <std::string>::const_iterator s_end = sections.end();
   for (; s != s_end; ++s) {

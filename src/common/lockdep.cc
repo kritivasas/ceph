@@ -36,7 +36,7 @@ namespace __gnu_cxx {
 #undef DOUT_COND
 #define DOUT_COND(cct, l) cct && l <= XDOUT_CONDVAR(cct, dout_subsys)
 #define lockdep_dout(v) lsubdout(g_lockdep_ceph_ctx, lockdep, v)
-#define MAX_LOCKS  100   // increase me as needed
+#define MAX_LOCKS  1000   // increase me as needed
 #define BACKTRACE_SKIP 3
 
 /******* Globals **********/
@@ -61,6 +61,17 @@ void lockdep_register_ceph_context(CephContext *cct)
 {
   pthread_mutex_lock(&lockdep_mutex);
   g_lockdep_ceph_ctx = cct;
+  pthread_mutex_unlock(&lockdep_mutex);
+}
+
+void lockdep_unregister_ceph_context(CephContext *cct)
+{
+  pthread_mutex_lock(&lockdep_mutex);
+  if (cct == g_lockdep_ceph_ctx) {
+    // this cct is going away; shut it down!
+    g_lockdep = false;
+    g_lockdep_ceph_ctx = NULL;
+  }
   pthread_mutex_unlock(&lockdep_mutex);
 }
 

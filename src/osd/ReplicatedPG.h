@@ -484,6 +484,31 @@ protected:
                  int result, int ack_type,
                  int fromosd, eversion_t pg_complete_thru=eversion_t(0,0));
 
+  /// true if we can send an ondisk/commit for v
+  bool already_complete(eversion_t v) {
+    for (xlist<RepGather*>::iterator i = repop_queue.begin();
+	 !i.end();
+	 ++i) {
+      if ((*i)->v > v)
+        break;
+      if (!(*i)->waitfor_disk.empty())
+	return false;
+    }
+    return true;
+  }
+  /// true if we can send an ack for v
+  bool already_ack(eversion_t v) {
+    for (xlist<RepGather*>::iterator i = repop_queue.begin();
+	 !i.end();
+	 ++i) {
+      if ((*i)->v > v)
+        break;
+      if (!(*i)->waitfor_ack.empty())
+	return false;
+    }
+    return true;
+  }
+
   friend class C_OSD_OpCommit;
   friend class C_OSD_OpApplied;
 
@@ -551,6 +576,19 @@ protected:
   struct PushInfo {
     ObjectRecoveryProgress recovery_progress;
     ObjectRecoveryInfo recovery_info;
+
+    void dump(Formatter *f) const {
+      {
+	f->open_object_section("recovery_progress");
+	recovery_progress.dump(f);
+	f->close_section();
+      }
+      {
+	f->open_object_section("recovery_info");
+	recovery_info.dump(f);
+	f->close_section();
+      }
+    }
   };
   map<hobject_t, map<int, PushInfo> > pushing;
 
@@ -558,6 +596,19 @@ protected:
   struct PullInfo {
     ObjectRecoveryProgress recovery_progress;
     ObjectRecoveryInfo recovery_info;
+
+    void dump(Formatter *f) const {
+      {
+	f->open_object_section("recovery_progress");
+	recovery_progress.dump(f);
+	f->close_section();
+      }
+      {
+	f->open_object_section("recovery_info");
+	recovery_info.dump(f);
+	f->close_section();
+      }
+    }
 
     bool is_complete() const {
       return recovery_progress.is_complete(recovery_info);
@@ -608,6 +659,82 @@ protected:
   set<hobject_t> backfills_in_flight;
   map<hobject_t, pg_stat_t> pending_backfill_updates;
 
+  void dump_recovery_info(Formatter *f) const {
+    f->dump_int("backfill_target", get_backfill_target());
+    f->dump_int("waiting_on_backfill", waiting_on_backfill);
+    f->dump_stream("backfill_pos") << backfill_pos;
+    {
+      f->open_object_section("backfill_info");
+      backfill_info.dump(f);
+      f->close_section();
+    }
+    {
+      f->open_object_section("peer_backfill_info");
+      peer_backfill_info.dump(f);
+      f->close_section();
+    }
+    {
+      f->open_array_section("backfills_in_flight");
+      for (set<hobject_t>::const_iterator i = backfills_in_flight.begin();
+	   i != backfills_in_flight.end();
+	   ++i) {
+	f->dump_stream("object") << *i;
+      }
+      f->close_section();
+    }
+    {
+      f->open_array_section("pull_from_peer");
+      for (map<int, set<hobject_t> >::const_iterator i = pull_from_peer.begin();
+	   i != pull_from_peer.end();
+	   ++i) {
+	f->open_object_section("pulling_from");
+	f->dump_int("pull_from", i->first);
+	{
+	  f->open_array_section("pulls");
+	  for (set<hobject_t>::const_iterator j = i->second.begin();
+	       j != i->second.end();
+	       ++j) {
+	    f->open_object_section("pull_info");
+	    assert(pulling.count(*j));
+	    pulling.find(*j)->second.dump(f);
+	    f->close_section();
+	  }
+	  f->close_section();
+	}
+	f->close_section();
+      }
+      f->close_section();
+    }
+    {
+      f->open_array_section("pushing");
+      for (map<hobject_t, map<int, PushInfo> >::const_iterator i =
+	     pushing.begin();
+	   i != pushing.end();
+	   ++i) {
+	f->open_object_section("object");
+	f->dump_stream("pushing") << i->first;
+	{
+	  f->open_array_section("pushing_to");
+	  for (map<int, PushInfo>::const_iterator j = i->second.begin();
+	       j != i->second.end();
+	       ++j) {
+	    f->open_object_section("push_progress");
+	    f->dump_stream("object_pushing") << j->first;
+	    {
+	      f->open_object_section("push_info");
+	      j->second.dump(f);
+	      f->close_section();
+	    }
+	    f->close_section();
+	  }
+	  f->close_section();
+	}
+	f->close_section();
+      }
+      f->close_section();
+    }
+  }
+
   /// leading edge of backfill
   hobject_t backfill_pos;
 
@@ -637,7 +764,7 @@ protected:
   void finish_degraded_object(const hobject_t& oid);
 
   // Cancels/resets pulls from peer
-  bool check_recovery_sources(const OSDMapRef map);
+  void check_recovery_sources(const OSDMapRef map);
   int pull(const hobject_t& oid, eversion_t v);
 
   // low level ops
@@ -693,6 +820,7 @@ protected:
     bool applied, committed;
     int ackerosd;
     eversion_t last_complete;
+    epoch_t epoch_started;
 
     uint64_t bytes_written;
 
@@ -735,7 +863,7 @@ protected:
     }
   };
   struct C_OSD_AppliedRecoveredObject : public Context {
-    ReplicatedPG *pg;
+    boost::intrusive_ptr<ReplicatedPG> pg;
     ObjectStore::Transaction *t;
     ObjectContext *obc;
     C_OSD_AppliedRecoveredObject(ReplicatedPG *p, ObjectStore::Transaction *tt, ObjectContext *o) :
@@ -754,6 +882,7 @@ protected:
     }
     void finish(int r) {
       pg->_committed_pushed_object(op, same_since, last_complete);
+      pg->put();
     }
   };
 
@@ -788,7 +917,9 @@ protected:
   int get_pgls_filter(bufferlist::iterator& iter, PGLSFilter **pfilter);
 
 public:
-  ReplicatedPG(OSD *o, PGPool *_pool, pg_t p, const hobject_t& oid, const hobject_t& ioid);
+  ReplicatedPG(OSDService *o, OSDMapRef curmap,
+	       PGPool _pool, pg_t p, const hobject_t& oid,
+	       const hobject_t& ioid);
   ~ReplicatedPG() {}
 
   int do_command(vector<string>& cmd, ostream& ss, bufferlist& idata, bufferlist& odata);
@@ -804,13 +935,21 @@ public:
 		       coll_t &col_to_trim,
 		       vector<hobject_t> &obs_to_trim);
   RepGather *trim_object(const hobject_t &coid, const snapid_t &sn);
-  bool snap_trimmer();
+  void snap_trimmer();
   int do_osd_ops(OpContext *ctx, vector<OSDOp>& ops);
   void do_osd_op_effects(OpContext *ctx);
 private:
   bool temp_created;
   coll_t temp_coll;
   coll_t get_temp_coll(ObjectStore::Transaction *t);
+public:
+  bool have_temp_coll() {
+    return temp_created;
+  }
+  coll_t get_temp_coll() {
+    return temp_coll;
+  }
+private:
   struct NotTrimming;
   struct SnapTrim : boost::statechart::event< SnapTrim > {
     SnapTrim() : boost::statechart::event < SnapTrim >() {}
@@ -901,6 +1040,7 @@ public:
   void on_role_change();
   void on_change();
   void on_activate();
+  void on_removal();
   void on_shutdown();
 };
 

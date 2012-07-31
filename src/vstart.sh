@@ -22,7 +22,7 @@ MON_ADDR=""
 
 conf="ceph.conf"
 
-keyring_fn="keyring"
+keyring_fn="$PWD/keyring"
 osdmap_fn="/tmp/ceph_osdmap.$$"
 monmap_fn="/tmp/ceph_monmap.$$"
 
@@ -201,7 +201,7 @@ test -d out || mkdir out
 $SUDO rm -rf out/*
 test -d gmon && $SUDO rm -rf gmon/*
 
-[ "$cephx" -eq 1 ] && test -e $keyring_fn && rm $keyring_fn
+[ "$cephx" -eq 1 ] && [ "$new" -eq 1 ] && test -e $keyring_fn && rm $keyring_fn
 
 
 # figure machine's ip
@@ -263,7 +263,6 @@ if [ "$start_mon" -eq 1 ]; then
 [global]
         osd pg bits = 3
         osd pgp bits = 5  ; (invalid, but ceph should cope!)
-$extra_conf
 EOF
 			[ "$cephx" -eq 1 ] && cat<<EOF >> $conf
         auth supported = cephx
@@ -271,7 +270,7 @@ EOF
 			cat <<EOF >> $conf
 
 [client]
-        keyring = keyring
+        keyring = $keyring_fn
 
 [mds]
 $DAEMONOPTS
@@ -280,6 +279,7 @@ $CMDSDEBUG
         mds debug auth pins = true
         mds debug subtrees = true
         mds data = dev/mds.\$id
+$extra_conf
 [osd]
 $DAEMONOPTS
         osd data = dev/osd\$id
@@ -290,10 +290,14 @@ $DAEMONOPTS
         osd scrub load threshold = 5.0
         filestore xattr use omap = true
 $COSDDEBUG
+$extra_conf
 [mon]
 $DAEMONOPTS
 $CMONDEBUG
+$extra_conf
         mon cluster log file = out/cluster.mon.\$id.log
+[global]
+$extra_conf
 EOF
 		fi
 
@@ -335,6 +339,9 @@ EOF
 
 		for f in $MONS
 		do
+		    cmd="rm -rf dev/mon.$f"
+		    echo $cmd
+		    $cmd
 		    cmd="$CEPH_BIN/ceph-mon --mkfs -c $conf -i $f --monmap=$monmap_fn"
 		    [ "$cephx" -eq 1 ] && cmd="$cmd --keyring=$keyring_fn"
 		    echo $cmd

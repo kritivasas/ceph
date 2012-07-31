@@ -12,7 +12,7 @@ Standards-Version: 3.9.3
 Package: ceph
 Architecture: linux-any
 Depends: ${shlibs:Depends}, ${misc:Depends}, sdparm | hdparm, binutils, ceph-common, uuid-runtime, python
-Recommends: ceph-mds, librados2, librbd1, btrfs-tools
+Recommends: ceph-mds, librados2, librbd1, btrfs-tools, gdisk
 Description: distributed storage and file system
  Ceph is a distributed storage system designed to provide excellent
  performance, reliability, and scalability.
@@ -122,7 +122,7 @@ Description: common utilities to mount and interact with a ceph file system
 
 Package: ceph-fs-common-dbg
 Architecture: linux-any
-Depends: ceph-common (= ${binary:Version}), ${misc:Depends}
+Depends: ceph-fs-common (= ${binary:Version}), ${misc:Depends}
 Conflicts: ceph-client-tools-dbg
 Replaces: ceph-client-tools-dbg
 Section: debug

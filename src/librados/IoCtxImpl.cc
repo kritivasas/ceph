@@ -102,15 +102,19 @@ int librados::IoCtxImpl::snap_create(const char *snapName)
   Mutex mylock ("IoCtxImpl::snap_create::mylock");
   Cond cond;
   bool done;
+  Context *onfinish = new C_SafeCond(&mylock, &cond, &done, &reply);
   lock->Lock();
-  objecter->create_pool_snap(poolid,
-			     sName,
-			     new C_SafeCond(&mylock, &cond, &done, &reply));
+  reply = objecter->create_pool_snap(poolid, sName, onfinish);
   lock->Unlock();
 
-  mylock.Lock();
-  while(!done) cond.Wait(mylock);
-  mylock.Unlock();
+  if (reply < 0) {
+    delete onfinish;
+  } else {
+    mylock.Lock();
+    while (!done)
+      cond.Wait(mylock);
+    mylock.Unlock();
+  }
   return reply;
 }
 
@@ -121,17 +125,22 @@ int librados::IoCtxImpl::selfmanaged_snap_create(uint64_t *psnapid)
   Mutex mylock("IoCtxImpl::selfmanaged_snap_create::mylock");
   Cond cond;
   bool done;
-  lock->Lock();
+  Context *onfinish = new C_SafeCond(&mylock, &cond, &done, &reply);
   snapid_t snapid;
-  objecter->allocate_selfmanaged_snap(poolid, &snapid,
-				      new C_SafeCond(&mylock, &cond, &done, &reply));
+  lock->Lock();
+  reply = objecter->allocate_selfmanaged_snap(poolid, &snapid, onfinish);
   lock->Unlock();
 
-  mylock.Lock();
-  while (!done) cond.Wait(mylock);
-  mylock.Unlock();
-  if (reply == 0)
-    *psnapid = snapid;
+  if (reply < 0) {
+    delete onfinish;
+  } else {
+    mylock.Lock();
+    while (!done)
+      cond.Wait(mylock);
+    mylock.Unlock();
+    if (reply == 0)
+      *psnapid = snapid;
+  }
   return reply;
 }
 
@@ -143,15 +152,19 @@ int librados::IoCtxImpl::snap_remove(const char *snapName)
   Mutex mylock ("IoCtxImpl::snap_remove::mylock");
   Cond cond;
   bool done;
+  Context *onfinish = new C_SafeCond(&mylock, &cond, &done, &reply);
   lock->Lock();
-  objecter->delete_pool_snap(poolid,
-			     sName,
-			     new C_SafeCond(&mylock, &cond, &done, &reply));
+  reply = objecter->delete_pool_snap(poolid, sName, onfinish);
   lock->Unlock();
 
-  mylock.Lock();
-  while(!done) cond.Wait(mylock);
-  mylock.Unlock();
+  if (reply < 0) {
+    delete onfinish; 
+  } else {
+    mylock.Lock();
+    while(!done)
+      cond.Wait(mylock);
+    mylock.Unlock();
+  }
   return reply;
 }
 
@@ -655,7 +668,7 @@ int librados::IoCtxImpl::aio_operate_read(const object_t &oid,
   Mutex::Locker l(*lock);
   objecter->read(oid, oloc,
 		 *o, snap_seq, pbl, 0,
-		 onack, 0);
+		 onack, &c->objver);
   return 0;
 }
 
@@ -1382,10 +1395,6 @@ int librados::IoCtxImpl::watch(const object_t& oid, uint64_t ver,
 int librados::IoCtxImpl::_notify_ack(const object_t& oid,
 				     uint64_t notify_id, uint64_t ver)
 {
-  Mutex mylock("IoCtxImpl::watch::mylock");
-  Cond cond;
-  eversion_t objver;
-
   ::ObjectOperation rd;
   prepare_assert_ops(&rd);
   rd.notify_ack(notify_id, ver);
@@ -1454,17 +1463,16 @@ int librados::IoCtxImpl::notify(const object_t& oid, uint64_t ver, bufferlist& b
 				   0, onack, NULL, &objver);
   lock->Unlock();
 
-  mylock_all.Lock();
   mylock.Lock();
   while (!done)
     cond.Wait(mylock);
   mylock.Unlock();
 
+  mylock_all.Lock();
   if (r == 0) {
     while (!done_all)
       cond_all.Wait(mylock_all);
   }
-
   mylock_all.Unlock();
 
   lock->Lock();
@@ -1600,8 +1608,10 @@ void librados::IoCtxImpl::C_NotifyComplete::notify(uint8_t opcode,
 						   uint64_t ver,
 						   bufferlist& bl)
 {
+  lock->Lock();
   *done = true;
   cond->Signal();
+  lock->Unlock();
 }
 
 /////////////////////////// WatchContext ///////////////////////////////

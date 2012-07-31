@@ -125,6 +125,7 @@ OPTION(mon_force_standby_active, OPT_BOOL, true) // should mons force standby-re
 OPTION(mon_min_osdmap_epochs, OPT_INT, 500)
 OPTION(mon_max_pgmap_epochs, OPT_INT, 500)
 OPTION(mon_max_log_epochs, OPT_INT, 500)
+OPTION(mon_max_osd, OPT_INT, 10000)
 OPTION(mon_probe_timeout, OPT_DOUBLE, 2.0)
 OPTION(mon_slurp_timeout, OPT_DOUBLE, 10.0)
 OPTION(mon_slurp_bytes, OPT_INT, 256*1024)    // limit size of slurp messages
@@ -312,7 +313,7 @@ OPTION(osd_mon_ack_timeout, OPT_INT, 30) // time out a mon if it doesn't ack sta
 OPTION(osd_min_down_reporters, OPT_INT, 1)   // number of OSDs who need to report a down OSD for it to count
 OPTION(osd_min_down_reports, OPT_INT, 3)     // number of times a down OSD must be reported for it to count
 OPTION(osd_default_data_pool_replay_window, OPT_INT, 45)
-OPTION(osd_preserve_trimmed_log, OPT_BOOL, true)
+OPTION(osd_preserve_trimmed_log, OPT_BOOL, false)
 OPTION(osd_auto_mark_unfound_lost, OPT_BOOL, false)
 OPTION(osd_recovery_delay_start, OPT_FLOAT, 15)
 OPTION(osd_recovery_max_active, OPT_INT, 5)
@@ -336,6 +337,12 @@ OPTION(osd_op_complaint_time, OPT_FLOAT, 30) // how many seconds old makes an op
 OPTION(osd_command_max_records, OPT_INT, 256)
 OPTION(osd_op_log_threshold, OPT_INT, 5) // how many op log messages to show in one go
 OPTION(osd_verify_sparse_read_holes, OPT_BOOL, false)  // read fiemap-reported holes and verify they are zeros
+OPTION(osd_debug_drop_ping_probability, OPT_DOUBLE, 0)
+OPTION(osd_debug_drop_ping_duration, OPT_INT, 0)
+OPTION(osd_debug_drop_pg_create_probability, OPT_DOUBLE, 0)
+OPTION(osd_debug_drop_pg_create_duration, OPT_INT, 1)
+OPTION(osd_op_history_size, OPT_U32, 20)    // Max number of completed ops to track
+OPTION(osd_op_history_duration, OPT_U32, 600) // Oldest completed op to track
 OPTION(filestore, OPT_BOOL, false)
 OPTION(filestore_debug_omap_check, OPT_BOOL, 0) // Expensive debugging check on sync
 // Use omap for xattrs for attrs over
@@ -347,13 +354,13 @@ OPTION(filestore_max_inline_xattrs, OPT_U32, 2)
 
 OPTION(filestore_max_sync_interval, OPT_DOUBLE, 5)    // seconds
 OPTION(filestore_min_sync_interval, OPT_DOUBLE, .01)  // seconds
-OPTION(filestore_btrfs_trans, OPT_BOOL, false)
 OPTION(filestore_btrfs_snap, OPT_BOOL, true)
 OPTION(filestore_btrfs_clone_range, OPT_BOOL, true)
 OPTION(filestore_fsync_flushes_journal_data, OPT_BOOL, false)
 OPTION(filestore_fiemap, OPT_BOOL, false)     // (try to) use fiemap
 OPTION(filestore_flusher, OPT_BOOL, true)
 OPTION(filestore_flusher_max_fds, OPT_INT, 512)
+OPTION(filestore_flush_min, OPT_INT, 65536)
 OPTION(filestore_sync_flush, OPT_BOOL, false)
 OPTION(filestore_journal_parallel, OPT_BOOL, false)
 OPTION(filestore_journal_writeahead, OPT_BOOL, false)
@@ -373,6 +380,7 @@ OPTION(filestore_update_to, OPT_INT, 1000)
 OPTION(filestore_blackhole, OPT_BOOL, false)     // drop any new transactions on the floor
 OPTION(filestore_dump_file, OPT_STR, "")         // file onto which store transaction dumps
 OPTION(filestore_kill_at, OPT_INT, 0)            // inject a failure at the n'th opportunity
+OPTION(filestore_fail_eio, OPT_BOOL, true)       // fail/crash on EIO
 OPTION(journal_dio, OPT_BOOL, true)
 OPTION(journal_aio, OPT_BOOL, false)
 OPTION(journal_block_align, OPT_BOOL, true)

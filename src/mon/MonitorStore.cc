@@ -95,21 +95,24 @@ int MonitorStore::umount()
 
 int MonitorStore::mkfs()
 {
-  std::string ret = run_cmd("rm", "-rf", dir.c_str(), (char*)NULL);
-  if (!ret.empty()) {
-    derr << "MonitorStore::mkfs: failed to remove " << dir
-	 << ": rm returned " << ret << dendl;
-    return -EIO;
+  int err;
+
+  err = ::mkdir(dir.c_str(), 0700);
+  if (err < 0 && errno != EEXIST) {
+    err = -errno;
+    derr << "MonitorStore::mkfs: unable to create " << dir << ": " << cpp_strerror(err) << dendl;
+    return err;
   }
 
-  ret = run_cmd("mkdir", "-p", dir.c_str(), (char*)NULL);
-  if (!ret.empty()) {
-    derr << "MonitorStore::mkfs: failed to mkdir -p " << dir
-	 << ": mkdir returned " << ret << dendl;
-    return -EIO;
+  int fd = ::open(dir.c_str(), O_RDONLY);
+  if (fd < 0) {
+    err = -errno;
+    derr << "MonitorStore::mkfs: unable to open " << dir << ": " << cpp_strerror(err) << dendl;
+    return err;
   }
+  ::close(fd);
 
-  dout(0) << "created monfs at " << dir.c_str() << " for "
+  dout(0) << "created monfs at " << dir << " for "
 	  << g_conf->name.get_id() << dendl;
   return 0;
 }
@@ -174,7 +177,7 @@ void MonitorStore::put_int(version_t val, const char *a, const char *b)
   char tfn[1024];
   snprintf(tfn, sizeof(tfn), "%s.new", fn);
 
-  int fd = TEMP_FAILURE_RETRY(::open(tfn, O_WRONLY|O_CREAT, 0600));
+  int fd = TEMP_FAILURE_RETRY(::open(tfn, O_WRONLY|O_CREAT|O_TRUNC, 0600));
   if (fd < 0) {
     int err = errno;
     derr << "MonitorStore::put_int: failed to open '" << tfn << "': "
@@ -379,7 +382,7 @@ int MonitorStore::put_bl_sn_map(const char *a,
     snprintf(fn, sizeof(fn), "%s/%llu", dfn, (long long unsigned)p->first);
     snprintf(tfn, sizeof(tfn), "%s.new", fn);
 
-    int fd = ::open(tfn, O_WRONLY|O_CREAT, 0600);
+    int fd = ::open(tfn, O_WRONLY|O_CREAT|O_TRUNC, 0600);
     if (fd < 0) {
       int err = -errno;
       derr << "failed to open " << tfn << ": " << cpp_strerror(err) << dendl;

@@ -99,7 +99,8 @@ public:
 
   // Parse a config file
   int parse_config_files(const char *conf_files,
-			 std::deque<std::string> *parse_errors, int flags);
+			 std::deque<std::string> *parse_errors,
+			 std::ostream *warnings, int flags);
 
   // Absorb config settings from the environment
   void parse_env();
@@ -141,9 +142,16 @@ public:
 
   /// dump all config values to a stream
   void show_config(std::ostream& out);
+  /// dump all config values to a formatter
+  void show_config(Formatter *f);
 
 private:
-  void _show_config(std::ostream& out);
+  void _show_config(std::ostream *out, Formatter *f);
+
+  void _get_my_sections(std::vector <std::string> &sections) const;
+
+  int _get_val_from_conf_file(const std::vector <std::string> &sections,
+			      const char *key, std::string &out, bool emeta) const;
 
   int parse_option(std::vector<const char*>& args,
 		   std::vector<const char*>::iterator& i,
@@ -151,7 +159,8 @@ private:
   int parse_injectargs(std::vector<const char*>& args,
 		      std::ostream *oss);
   int parse_config_files_impl(const std::list<std::string> &conf_files,
-		   std::deque<std::string> *parse_errors);
+			      std::deque<std::string> *parse_errors,
+			      std::ostream *warnings);
 
   int set_val_impl(const char *val, const config_option *opt);
   int set_val_raw(const char *val, const config_option *opt);

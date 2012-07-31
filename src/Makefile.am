@@ -123,7 +123,7 @@ rgw_dencoder_src = rgw/rgw_dencoder.cc \
 
 ceph_dencoder_SOURCES = test/encoding/ceph_dencoder.cc ${rgw_dencoder_src}
 ceph_dencoder_CXXFLAGS = ${CRYPTO_CXXFLAGS} ${AM_CXXFLAGS}
-ceph_dencoder_LDADD = $(LIBGLOBAL_LDA) libosd.a libmds.a $(LIBOS_LDA) libmon.a
+ceph_dencoder_LDADD = $(LIBGLOBAL_LDA) libcls_lock_client.a libosd.a libmds.a $(LIBOS_LDA) libmon.a
 bin_PROGRAMS += ceph-dencoder
 
 mount_ceph_SOURCES = mount/mount.ceph.c common/armor.c common/safe_io.c common/secret.c include/addr_parsing.c
@@ -361,7 +361,7 @@ librbd_la_LDFLAGS = ${AM_LDFLAGS} -version-info 1:0:0 \
 lib_LTLIBRARIES += librbd.la
 
 rados_SOURCES = rados.cc rados_import.cc rados_export.cc rados_sync.cc common/obj_bencher.cc
-rados_LDADD = libglobal.la librados.la $(PTHREAD_LIBS) -lm $(CRYPTO_LIBS) $(EXTRALIBS)
+rados_LDADD = libglobal.la libcls_lock_client.a librados.la $(PTHREAD_LIBS) -lm $(CRYPTO_LIBS) $(EXTRALIBS)
 bin_PROGRAMS += rados
 
 if WITH_REST_BENCH
@@ -427,6 +427,16 @@ radoslibdir = $(libdir)/rados-classes
 radoslib_LTLIBRARIES = libcls_rbd.la
 
 
+# rbd: rados block device class
+libcls_lock_la_SOURCES = cls/lock/cls_lock.cc
+libcls_lock_la_CFLAGS = ${AM_CFLAGS}
+libcls_lock_la_CXXFLAGS= ${AM_CXXFLAGS}
+libcls_lock_la_LIBADD = $(PTHREAD_LIBS) $(EXTRALIBS)
+libcls_lock_la_LDFLAGS = ${AM_LDFLAGS} -version-info 1:0:0 -export-symbols-regex '.*__cls_.*'
+
+radoslib_LTLIBRARIES += libcls_lock.la
+
+
 if WITH_RADOSGW
 # rgw: rados gateway
 libcls_rgw_la_SOURCES = cls_rgw.cc
@@ -437,6 +447,12 @@ libcls_rgw_la_LDFLAGS = ${AM_LDFLAGS} -version-info 1:0:0 -export-symbols-regex 
 
 radoslib_LTLIBRARIES += libcls_rgw.la
 endif
+
+libcls_lock_client_a_SOURCES =  \
+	cls/lock/cls_lock_client.cc  \
+	cls/lock/cls_lock_types.cc \
+	cls/lock/cls_lock_ops.cc
+noinst_LIBRARIES += libcls_lock_client.a
 
 ## hadoop client
 if WITH_HADOOPCLIENT
@@ -673,6 +689,12 @@ unittest_daemon_config_LDADD =  ${UNITTEST_LDADD} ${LIBGLOBAL_LDA}
 unittest_daemon_config_CXXFLAGS = ${CRYPTO_CFLAGS} ${AM_CXXFLAGS} ${UNITTEST_CXXFLAGS}
 check_PROGRAMS += unittest_daemon_config
 
+unittest_osd_osdcap_SOURCES = test/osd/osdcap.cc
+unittest_osd_osdcap_LDFLAGS = $(PTHREAD_CFLAGS) ${AM_LDFLAGS}
+unittest_osd_osdcap_LDADD =  ${UNITTEST_LDADD} ${LIBGLOBAL_LDA} libosd.a
+unittest_osd_osdcap_CXXFLAGS = ${CRYPTO_CFLAGS} ${AM_CXXFLAGS} ${UNITTEST_CXXFLAGS}
+check_PROGRAMS += unittest_osd_osdcap
+
 #if WITH_RADOSGW
 #unittest_librgw_SOURCES = test/librgw.cc
 #unittest_librgw_LDFLAGS = -lrt $(PTHREAD_CFLAGS) -lcurl ${AM_LDFLAGS}
@@ -732,6 +754,12 @@ test_rados_api_stat_LDFLAGS = ${AM_LDFLAGS}
 test_rados_api_stat_LDADD =  librados.la ${UNITTEST_STATIC_LDADD}
 test_rados_api_stat_CXXFLAGS = ${AM_CXXFLAGS} ${UNITTEST_CXXFLAGS}
 bin_DEBUGPROGRAMS += test_rados_api_stat
+
+test_rados_api_cls_lock_SOURCES = test/rados-api/cls_lock.cc test/rados-api/test.cc
+test_rados_api_cls_lock_LDFLAGS = ${AM_LDFLAGS}
+test_rados_api_cls_lock_LDADD =  libcls_lock_client.a librados.la ${UNITTEST_STATIC_LDADD}
+test_rados_api_cls_lock_CXXFLAGS = ${AM_CXXFLAGS} ${UNITTEST_CXXFLAGS}
+bin_DEBUGPROGRAMS += test_rados_api_cls_lock
 
 test_rados_api_watch_notify_SOURCES = test/rados-api/watch_notify.cc test/rados-api/test.cc
 test_rados_api_watch_notify_LDFLAGS = ${AM_LDFLAGS}
@@ -944,12 +972,12 @@ rados_include_DATA = \
 	$(srcdir)/include/page.h \
 	$(srcdir)/include/crc32c.h
 
-crush_includedir = $(includedir)/crush
-crush_include_DATA = \
-	$(srcdir)/crush/hash.h \
-	$(srcdir)/crush/crush.h \
-	$(srcdir)/crush/mapper.h \
-	$(srcdir)/crush/types.h
+#crush_includedir = $(includedir)/crush
+#crush_include_DATA = \
+#	$(srcdir)/crush/hash.h \
+#	$(srcdir)/crush/crush.h \
+#	$(srcdir)/crush/mapper.h \
+#	$(srcdir)/crush/types.h
 
 FORCE:
 .git_version: FORCE
@@ -1025,6 +1053,7 @@ libcommon_files = \
 	common/ConfUtils.cc \
 	common/MemoryModel.cc \
 	common/armor.c \
+	common/fd.cc \
 	common/xattr.c \
 	common/safe_io.c \
 	common/snap_types.cc \
@@ -1157,7 +1186,7 @@ libosd_a_SOURCES = \
 	osd/ReplicatedPG.cc \
 	osd/Ager.cc \
 	osd/OSD.cc \
-	osd/OSDCaps.cc \
+	osd/OSDCap.cc \
 	osd/Watch.cc \
 	osd/ClassHandler.cc \
 	osd/OpRequest.cc
@@ -1227,6 +1256,9 @@ noinst_HEADERS = \
 	client/ObjecterWriteback.h\
 	cls_acl.cc\
 	cls_crypto.cc\
+	cls/lock/cls_lock_types.h\
+	cls/lock/cls_lock_ops.h\
+	cls/lock/cls_lock_client.h\
 	common/BackTrace.h\
 	common/RefCountedObj.h\
 	common/HeartbeatMap.h\
@@ -1241,6 +1273,7 @@ noinst_HEADERS = \
 	common/debug.h\
 	common/dout.h\
 	common/escape.h\
+	common/fd.h\
 	common/version.h\
 	common/hex.h\
 	common/entity_name.h\
@@ -1261,6 +1294,7 @@ noinst_HEADERS = \
 	common/admin_socket_client.h \
 	common/shared_cache.hpp \
 	common/simple_cache.hpp \
+	common/sharedptr_registry.hpp \
         common/MemoryModel.h\
         common/Mutex.h\
 	common/PrebufferedStreambuf.h\
@@ -1365,6 +1399,7 @@ noinst_HEADERS = \
 	librados/IoCtxImpl.h\
 	librados/PoolAsyncCompletionImpl.h\
 	librados/RadosClient.h\
+	librbd/cls_rbd.h\
 	librbd/cls_rbd_client.h\
 	librbd/LibrbdWriteback.h\
 	logrotate.conf\
@@ -1578,7 +1613,7 @@ noinst_HEADERS = \
         osd/Ager.h\
 	osd/ClassHandler.h\
         osd/OSD.h\
-        osd/OSDCaps.h\
+        osd/OSDCap.h\
         osd/OSDMap.h\
         osd/ObjectVersioner.h\
 	osd/OpRequest.h\
@@ -1686,5 +1721,5 @@ project.tgz: clean
 	tar czvf project.tgz README emit output
 
 submit-coverity:
-	scp project.tgz ceph.newdream.net:ceph.newdream.net/coverity/`git describe`.tgz
-	echo "v2;ceph;"`cat .coverity.build.pass`";MAIL;http://ceph.newdream.net/coverity/"`git describe`.tgz | mail build@submit.scan.coverity.com
+	scp project.tgz ceph.newdream.net:ceph.com/coverity/`git describe`.tgz
+	echo "v2;ceph;"`cat .coverity.build.pass`";MAIL;http://ceph.com/coverity/"`git describe`.tgz | mail build@submit.scan.coverity.com

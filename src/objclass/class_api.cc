@@ -166,6 +166,22 @@ int cls_read(cls_method_context_t hctx, int ofs, int len,
   return *outdatalen;
 }
 
+int cls_get_request_origin(cls_method_context_t hctx, entity_inst_t *origin)
+{
+  ReplicatedPG::OpContext **pctx = static_cast<ReplicatedPG::OpContext **>(hctx);
+  *origin = (*pctx)->op->request->get_orig_source_inst();
+  return 0;
+}
+
+int cls_cxx_create(cls_method_context_t hctx, bool exclusive)
+{
+  ReplicatedPG::OpContext **pctx = (ReplicatedPG::OpContext **)hctx;
+  vector<OSDOp> ops(1);
+  ops[0].op.op = CEPH_OSD_OP_CREATE;
+  ops[0].op.flags = (exclusive ? CEPH_OSD_OP_FLAG_EXCL : 0);
+  return (*pctx)->pg->do_osd_ops(*pctx, ops);
+}
+
 int cls_cxx_stat(cls_method_context_t hctx, uint64_t *size, time_t *mtime)
 {
   ReplicatedPG::OpContext **pctx = (ReplicatedPG::OpContext **)hctx;
@@ -240,6 +256,66 @@ int cls_cxx_replace(cls_method_context_t hctx, int ofs, int len, bufferlist *inb
   ops[1].op.extent.length = len;
   ops[1].indata = *inbl;
   return (*pctx)->pg->do_osd_ops(*pctx, ops);
+}
+
+int cls_cxx_getxattr(cls_method_context_t hctx, const char *name,
+                     bufferlist *outbl)
+{
+  ReplicatedPG::OpContext **pctx = (ReplicatedPG::OpContext **)hctx;
+  bufferlist name_data;
+  vector<OSDOp> nops(1);
+  OSDOp& op = nops[0];
+  int r;
+
+  op.op.op = CEPH_OSD_OP_GETXATTR;
+  op.indata.append(name);
+  op.op.xattr.name_len = strlen(name);
+  r = (*pctx)->pg->do_osd_ops(*pctx, nops);
+  if (r < 0)
+    return r;
+
+  outbl->claim(op.outdata);
+  return outbl->length();
+}
+
+int cls_cxx_getxattrs(cls_method_context_t hctx, map<string, bufferlist> *attrset)
+{
+  ReplicatedPG::OpContext **pctx = (ReplicatedPG::OpContext **)hctx;
+  vector<OSDOp> nops(1);
+  OSDOp& op = nops[0];
+  int r;
+
+  op.op.op = CEPH_OSD_OP_GETXATTRS;
+  r = (*pctx)->pg->do_osd_ops(*pctx, nops);
+  if (r < 0)
+    return r;
+
+  bufferlist::iterator iter = op.outdata.begin();
+  try {
+    ::decode(*attrset, iter);
+  } catch (buffer::error& err) {
+    return -EIO;
+  }
+  return 0;
+}
+
+int cls_cxx_setxattr(cls_method_context_t hctx, const char *name,
+                     bufferlist *inbl)
+{
+  ReplicatedPG::OpContext **pctx = (ReplicatedPG::OpContext **)hctx;
+  bufferlist name_data;
+  vector<OSDOp> nops(1);
+  OSDOp& op = nops[0];
+  int r;
+
+  op.op.op = CEPH_OSD_OP_SETXATTR;
+  op.indata.append(name);
+  op.indata.append(*inbl);
+  op.op.xattr.name_len = strlen(name);
+  op.op.xattr.value_len = inbl->length();
+  r = (*pctx)->pg->do_osd_ops(*pctx, nops);
+
+  return r;
 }
 
 int cls_cxx_snap_revert(cls_method_context_t hctx, snapid_t snapid)
@@ -317,7 +393,6 @@ int cls_cxx_map_get_vals(cls_method_context_t hctx, const string &start_obj,
   OSDOp& op = ops[0];
   int ret;
 
-  string start_after;
   bufferlist inbl;
 
   ::encode(start_obj, op.indata);

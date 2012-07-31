@@ -55,7 +55,7 @@ void _usage()
   cerr << "                             + bucket-id)\n";
   cerr << "  log rm                     remove log object\n";
   cerr << "  usage show                 show usage (by user, date range)\n";
-  cerr << "  usage trim                 show usage (by user, date range)\n";
+  cerr << "  usage trim                 trim usage (by user, date range)\n";
   cerr << "  temp remove                remove temporary objects that were created up to\n";
   cerr << "                             specified date (and optional time)\n";
   cerr << "options:\n";
@@ -74,10 +74,9 @@ void _usage()
   cerr << "   --bucket=<bucket>\n";
   cerr << "   --pool=<pool>\n";
   cerr << "   --object=<object>\n";
-  cerr << "   --date=<yyyy-mm-dd>\n";
-  cerr << "   --start-date=<yyyy-mm-dd>\n";
-  cerr << "   --end-date=<yyyy-mm-dd>\n";
-  cerr << "   --time=<HH:MM:SS>\n";
+  cerr << "   --date=<date>\n";
+  cerr << "   --start-date=<date>\n";
+  cerr << "   --end-date=<date>\n";
   cerr << "   --bucket-id=<bucket-id>\n";
   cerr << "   --format=<format>         specify output format for certain operations: xml,\n";
   cerr << "                             json\n";
@@ -90,6 +89,9 @@ void _usage()
   cerr << "   --skip-zero-entries       log show only dumps entries that don't have zero value\n";
   cerr << "                             in one of the numeric field\n";
   cerr << "   --yes-i-really-mean-it    required for certain operations\n";
+  cerr << "\n";
+  cerr << "<date> := \"YYYY-MM-DD[ hh:mm:ss]\"\n";
+  cerr << "\n";
   generic_client_usage();
 }
 
@@ -514,16 +516,34 @@ enum ObjectKeyType {
   KEY_TYPE_S3,
 };
 
-static void parse_date(string& date, uint64_t *epoch)
+static void parse_date(string& date, uint64_t *epoch, string *out_date = NULL, string *out_time = NULL)
 {
   struct tm tm;
 
   memset(&tm, 0, sizeof(tm));
 
   const char *p = strptime(date.c_str(), "%Y-%m-%d", &tm);
-  if (p && !*p) { // success!
-    time_t t = timegm(&tm);
+  if (p) {
+    if (*p == ' ') {
+      p++;
+      strptime(p, " %H:%M:%S", &tm);
+    }
+  } else {
+    return;
+  }
+  time_t t = timegm(&tm);
+  if (epoch)
     *epoch = (uint64_t)t;
+
+  if (out_date) {
+    char buf[32];
+    strftime(buf, sizeof(buf), "%F", &tm);
+    *out_date = buf;
+  }
+  if (out_time) {
+    char buf[32];
+    strftime(buf, sizeof(buf), "%T", &tm);
+    *out_time = buf;
   }
 }
 
@@ -538,12 +558,13 @@ int main(int argc, char **argv)
 
   std::string user_id, access_key, secret_key, user_email, display_name;
   std::string bucket_name, pool_name, object;
-  std::string date, time, subuser, access, format;
+  std::string date, subuser, access, format;
   std::string start_date, end_date;
   std::string key_type_str;
   ObjectKeyType key_type = KEY_TYPE_S3;
   rgw_bucket bucket;
   uint32_t perm_mask = 0;
+  bool specified_perm_mask = false;
   uint64_t auid = -1;
   RGWUserInfo info;
   RGWRados *store;
@@ -623,19 +644,18 @@ int main(int argc, char **argv)
       auid = tmp;
     } else if (ceph_argparse_witharg(args, i, &val, "--max-buckets", (char*)NULL)) {
       max_buckets = atoi(val.c_str());
-    } else if (ceph_argparse_witharg(args, i, &val, "--date", (char*)NULL)) {
+    } else if (ceph_argparse_witharg(args, i, &val, "--date", "--time", (char*)NULL)) {
       date = val;
       if (end_date.empty())
         end_date = date;
-    } else if (ceph_argparse_witharg(args, i, &val, "--start-date", (char*)NULL)) {
+    } else if (ceph_argparse_witharg(args, i, &val, "--start-date", "--start-time", (char*)NULL)) {
       start_date = val;
-    } else if (ceph_argparse_witharg(args, i, &val, "--end-date", (char*)NULL)) {
+    } else if (ceph_argparse_witharg(args, i, &val, "--end-date", "--end-time", (char*)NULL)) {
       end_date = val;
-    } else if (ceph_argparse_witharg(args, i, &val, "--time", (char*)NULL)) {
-      time = val;
     } else if (ceph_argparse_witharg(args, i, &val, "--access", (char*)NULL)) {
       access = val;
       perm_mask = str_to_perm(access.c_str());
+      specified_perm_mask = true;
     } else if (ceph_argparse_witharg(args, i, &val, "--bucket-id", (char*)NULL)) {
       bucket_id = val;
       if (bucket_id.empty()) {
@@ -845,30 +865,15 @@ int main(int argc, char **argv)
   map<string, RGWSubUser>::iterator uiter;
   RGWUserInfo old_info = info;
 
-  if ((!bucket_name.empty()) || !bucket_id.empty()) {
-    if (!bucket_id.empty()) {
-      int ret = rgwstore->get_bucket_info(NULL, bucket_id, bucket_info);
-
-      if (ret < 0) {
-        cerr << "could not retrieve bucket info for bucket_id=" << bucket_id << std::endl;
-        return ret;
-      }
-      bucket = bucket_info.bucket;
-      if ((!bucket_name.empty()) && bucket.name.compare(bucket_name.c_str()) != 0) {
-        cerr << "bucket name does not match bucket id (expected bucket name: " << bucket.name << ")" << std::endl;
-        return -EINVAL;
-      }
-    } else {
-      string bucket_name_str = bucket_name;
-      RGWBucketInfo bucket_info;
-      int r = rgwstore->get_bucket_info(NULL, bucket_name_str, bucket_info);
-      if (r < 0) {
-        cerr << "could not get bucket info for bucket=" << bucket_name_str << std::endl;
-        return r;
-      }
-      bucket = bucket_info.bucket;
-      bucket_id = bucket.bucket_id;
+  if (!bucket_name.empty()) {
+    string bucket_name_str = bucket_name;
+    RGWBucketInfo bucket_info;
+    int r = rgwstore->get_bucket_info(NULL, bucket_name_str, bucket_info);
+    if (r < 0) {
+      cerr << "could not get bucket info for bucket=" << bucket_name_str << std::endl;
+      return r;
     }
+    bucket = bucket_info.bucket;
   }
 
   int err;
@@ -915,9 +920,10 @@ int main(int argc, char **argv)
     if (auid != (uint64_t)-1)
       info.auid = auid;
     if (!subuser.empty()) {
-      RGWSubUser u;
+      RGWSubUser u = info.subusers[subuser];
       u.name = subuser;
-      u.perm_mask = perm_mask;
+      if (specified_perm_mask)
+        u.perm_mask = perm_mask;
 
       info.subusers[subuser] = u;
     }
@@ -1093,7 +1099,9 @@ int main(int argc, char **argv)
       cerr << "date wasn't specified" << std::endl;
       return usage();
     }
-    int r = store->remove_temp_objects(date, time);
+    string parsed_date, parsed_time;
+    parse_date(date, NULL, &parsed_date, &parsed_time);
+    int r = store->remove_temp_objects(parsed_date, parsed_time);
     if (r < 0) {
       cerr << "failure removing temp objects: " << cpp_strerror(r) << std::endl;
       return 1;
@@ -1305,8 +1313,8 @@ next:
   }
 
   if (opt_cmd == OPT_BUCKET_STATS) {
-    if (bucket_name.empty() && bucket_id.empty() && user_id.empty()) {
-      cerr << "either bucket or bucket-id or uid needs to be specified" << std::endl;
+    if (bucket_name.empty() && user_id.empty()) {
+      cerr << "either bucket or uid needs to be specified" << std::endl;
       return usage();
     }
     formatter->reset();

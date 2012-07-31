@@ -71,6 +71,7 @@ public:
   osd_stat_t osd_sum;
 
   set<pg_t> creating_pgs;   // lru: front = new additions, back = recently pinged
+  map<int,set<pg_t> > creating_pgs_by_osd;
 
   enum StuckPG {
     STUCK_INACTIVE,
@@ -89,6 +90,7 @@ public:
 
   void apply_incremental(const Incremental& inc);
   void redo_full_sets();
+  void register_nearfull_status(int osd, const osd_stat_t& s);
   void calc_stats();
   void stat_pg_add(const pg_t &pgid, const pg_stat_t &s);
   void stat_pg_sub(const pg_t &pgid, const pg_stat_t &s);

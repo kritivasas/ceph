@@ -36,7 +36,7 @@ TYPE(coll_t)
 TYPE(osd_stat_t)
 TYPE(OSDSuperblock)
 TYPE(pool_snap_info_t)
-TYPE(pg_pool_t)
+TYPE_FEATUREFUL(pg_pool_t)
 TYPE(object_stat_sum_t)
 TYPE(object_stat_collection_t)
 TYPE(pg_stat_t)
@@ -44,7 +44,7 @@ TYPE(pool_stat_t)
 TYPE(pg_history_t)
 TYPE(pg_info_t)
 TYPE(pg_interval_t)
-TYPE(pg_query_t)
+//TYPE(pg_query_t)
 TYPE(pg_log_entry_t)
 TYPE(pg_log_t)
 TYPE(pg_missing_t::item)
@@ -77,7 +77,7 @@ TYPE(PGMap::Incremental)
 TYPE(PGMap)
 
 #include "mon/MonMap.h"
-TYPE(MonMap)
+TYPE_FEATUREFUL(MonMap)
 
 #include "mon/MonCaps.h"
 TYPE(MonCap)
@@ -132,7 +132,24 @@ TYPE(rgw_obj)
 TYPE(rgw_log_entry)
 TYPE(rgw_intent_log_entry)
 
+#include "librbd/cls_rbd.h"
+TYPE(cls_rbd_parent)
+TYPE(cls_rbd_snap)
+
 #endif
+
+#include "cls/lock/cls_lock_types.h"
+TYPE(rados::cls::lock::locker_id_t)
+TYPE(rados::cls::lock::locker_info_t)
+
+#include "cls/lock/cls_lock_ops.h"
+TYPE(cls_lock_lock_op)
+TYPE(cls_lock_unlock_op)
+TYPE(cls_lock_break_op)
+TYPE(cls_lock_get_info_op)
+TYPE(cls_lock_get_info_reply)
+TYPE(cls_lock_list_locks_reply)
+
 
 // --- messages ---
 #include "messages/MAuth.h"

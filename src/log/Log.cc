@@ -188,9 +188,10 @@ void Log::_flush(EntryQueue *t, EntryQueue *requeue, bool crash)
   while ((e = t->dequeue()) != NULL) {
     unsigned sub = e->m_subsys;
 
-    bool do_fd = m_fd >= 0 && (crash || m_subs->get_log_level(sub) >= e->m_prio);
-    bool do_syslog = (crash ? m_syslog_crash : m_syslog_log) >= e->m_prio;
-    bool do_stderr = (crash ? m_stderr_crash : m_stderr_log) >= e->m_prio;
+    bool should_log = crash || m_subs->get_log_level(sub) >= e->m_prio;
+    bool do_fd = m_fd >= 0 && should_log;
+    bool do_syslog = m_syslog_crash >= e->m_prio && should_log;
+    bool do_stderr = m_stderr_crash >= e->m_prio && should_log;
 
     if (do_fd || do_syslog || do_stderr) {
       int buflen = 0;
@@ -258,6 +259,27 @@ void Log::dump_recent()
   EntryQueue old;
   _log_message("--- begin dump of recent events ---", true);
   _flush(&m_recent, &old, true);  
+
+  char buf[4096];
+  _log_message("--- logging levels ---", true);
+  for (vector<Subsystem>::iterator p = m_subs->m_subsys.begin();
+       p != m_subs->m_subsys.end();
+       ++p) {
+    snprintf(buf, sizeof(buf), "  %2d/%2d %s", p->log_level, p->gather_level, p->name.c_str());
+    _log_message(buf, true);
+  }
+
+  sprintf(buf, "  %2d/%2d (syslog threshold)", m_syslog_log, m_syslog_crash);
+  _log_message(buf, true);
+  sprintf(buf, "  %2d/%2d (stderr threshold)", m_stderr_log, m_stderr_crash);
+  _log_message(buf, true);
+  sprintf(buf, "  max_recent %9d", m_max_recent);
+  _log_message(buf, true);
+  sprintf(buf, "  max_new    %9d", m_max_new);
+  _log_message(buf, true);
+  sprintf(buf, "  log_file %s", m_log_file.c_str());
+  _log_message(buf, true);
+
   _log_message("--- end dump of recent events ---", true);
 
   pthread_mutex_unlock(&m_flush_mutex);

@@ -7,6 +7,7 @@
 #ifdef __cplusplus
 
 #include "../include/types.h"
+#include "msg/msg_types.h"
 
 extern "C" {
 #endif
@@ -56,6 +57,10 @@ extern int cls_getxattr(cls_method_context_t hctx, const char *name,
                                  char **outdata, int *outdatalen);
 extern int cls_setxattr(cls_method_context_t hctx, const char *name,
                                  const char *value, int val_len);
+/** This will fill in the passed origin pointer with the origin of the
+ * request which activated your class call. */
+extern int cls_get_request_origin(cls_method_context_t hctx,
+                                  entity_inst_t *origin);
 
 /* class registration api */
 extern int cls_register(const char *name, cls_handle_t *handle);
@@ -91,10 +96,16 @@ typedef int (*cls_method_cxx_call_t)(cls_method_context_t ctx,
 extern int cls_register_cxx_method(cls_handle_t hclass, const char *method, int flags,
 				   cls_method_cxx_call_t class_call, cls_method_handle_t *handle);
 
+extern int cls_cxx_create(cls_method_context_t hctx, bool exclusive);
 extern int cls_cxx_stat(cls_method_context_t hctx, uint64_t *size, time_t *mtime);
 extern int cls_cxx_read(cls_method_context_t hctx, int ofs, int len, bufferlist *bl);
 extern int cls_cxx_write(cls_method_context_t hctx, int ofs, int len, bufferlist *bl);
 extern int cls_cxx_write_full(cls_method_context_t hctx, bufferlist *bl);
+extern int cls_cxx_getxattr(cls_method_context_t hctx, const char *name,
+                            bufferlist *outbl);
+extern int cls_cxx_getxattrs(cls_method_context_t hctx, map<string, bufferlist> *attrset);
+extern int cls_cxx_setxattr(cls_method_context_t hctx, const char *name,
+                            bufferlist *inbl);
 extern int cls_cxx_replace(cls_method_context_t hctx, int ofs, int len, bufferlist *bl);
 extern int cls_cxx_snap_revert(cls_method_context_t hctx, snapid_t snapid);
 extern int cls_cxx_map_clear(cls_method_context_t hctx);

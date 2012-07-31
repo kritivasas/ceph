@@ -3,88 +3,221 @@
 =====================
 
 We use Chef cookbooks to deploy Ceph. See `Managing Cookbooks with Knife`_ for details
-on using ``knife``.  For Chef installation instructions, see
-`Installing Chef <../../install/chef>`_.
+on using ``knife``.  For Chef installation instructions, see `Installing Chef`_.
 
-Add a Cookbook Path
--------------------
-Add the ``cookbook_path`` to your ``~/.ceph/knife.rb`` configuration file. For example:: 
+Clone the Required Cookbooks
+----------------------------
 
-	cookbook_path '/home/userId/.chef/ceph-cookbooks'
-
-Install Ceph Cookbooks
-----------------------
 To get the cookbooks for Ceph, clone them from git.::
 
-	cd ~/.chef	
-	git clone https://github.com/ceph/ceph-cookbooks.git
-	knife cookbook upload parted btrfs ceph
+	cd ~/chef-cookbooks
+	git clone https://github.com/opscode-cookbooks/apache2.git
+	git clone https://github.com/ceph/ceph-cookbooks.git ceph
 
-Install Apache Cookbooks
-------------------------
-RADOS Gateway uses Apache 2. So you must install the Apache 2 cookbooks. 
-To retrieve the Apache 2 cookbooks, execute the following::  
+Add the Required Cookbook Paths
+-------------------------------
 
-	cd ~/.chef/ceph-cookbooks
-	knife cookbook site download apache2
+If you added a default cookbook path when you installed Chef, ``knife``
+may be able to upload the cookbook you've cloned to your cookbook path
+directory without further configuration. If you used a different path, 
+or if the cookbook repository you cloned has a different tree structure, 
+add the required cookbook path to your ``knife.rb`` file. The 
+``cookbook_path`` setting takes a string or an array of strings. 
+For example, you can replace a string path with an array of string paths::
 
-The `apache2-{version}.tar.gz`` archive will appear in your ``~/.ceph`` directory.
-In the following example, replace ``{version}`` with the version of the Apache 2
-cookbook archive knife retrieved. Then, expand the archive and upload it to the 
-Chef server.:: 
+	cookbook_path '/home/{user-name}/chef-cookbooks/'
 
-	tar xvf apache2-{version}.tar.gz
-	knife cookbook upload apache2
+Becomes::
+	
+	cookbook_path [
+		'/home/{user-name}/chef-cookbooks/', 
+		'/home/{user-name}/chef-cookbooks/{another-directory}/',
+		'/some/other/path/to/cookbooks/'
+	]
 
-Configure Chef
---------------
-To configure Chef, you must specify an environment and a series of roles. You 
-may use the Web UI or ``knife`` to perform these tasks.
+Install the Cookbooks
+---------------------
 
-The following instructions demonstrate how to perform these tasks with ``knife``.
+To install Ceph, you must upload the Ceph cookbooks and the Apache cookbooks
+(for use with RADOSGW) to your Chef server. :: 
+
+	knife cookbook upload apache2 ceph
+
+Configure your Ceph Environment
+-------------------------------
+
+The Chef server can support installation of software for multiple environments.
+The environment you create for Ceph requires an ``fsid``, the secret for
+your monitor(s) if you are running Ceph with ``cephx`` authentication, and
+the host name (i.e., short name) for your monitor hosts.
+
+.. tip: Open an empty text file to hold the following values until you create
+   your Ceph environment.
+
+For the filesystem ID, use ``uuidgen`` from the ``uuid-runtime`` package to 
+generate a unique identifier. :: 
+
+	uuidgen -r
+
+For the monitor(s) secret(s), use ``ceph-authtool`` to generate the secret(s)::
+
+	sudo apt-get update	
+	sudo apt-get install ceph-common
+	ceph-authtool /dev/stdout --name=mon. --gen-key  
+ 
+The secret is the value to the right of ``"key ="``, and should look something 
+like this:: 
+
+	AQBAMuJPINJgFhAAziXIrLvTvAz4PRo5IK/Log==
+
+To create an environment for Ceph, set a command line editor. For example:: 
+
+	export EDITOR=vim
+
+Then, use ``knife`` to create an environment. :: 
+
+	knife environment create {env-name}
+	
+For example:: 
+
+	knife environment create Ceph
+
+A JSON file will appear. Perform the following steps: 
+
+#. Enter a description for the environment. 
+#. In ``"default_attributes": {}``, add ``"ceph" : {}``.
+#. Within ``"ceph" : {}``, add ``"monitor-secret":``.
+#. Immediately following ``"monitor-secret":`` add the key you generated within quotes, followed by a comma.
+#. Within ``"ceph":{}`` and following the ``monitor-secret`` key-value pair, add ``"config": {}``
+#. Within ``"config": {}`` add ``"fsid":``.
+#. Immediately following ``"fsid":``, add the unique identifier you generated within quotes, followed by a comma.
+#. Within ``"config": {}`` and following the ``fsid`` key-value pair, add ``"mon_initial_members":``
+#. Immediately following ``"mon_initial_members":``, enter the initial monitor host names.
+
+For example:: 
+
+	"default_attributes" : {
+		"ceph": {
+			"monitor-secret": "{replace-with-generated-secret}",
+			"config": {
+				"fsid": "{replace-with-generated-uuid}",
+				"mon_initial_members": "{replace-with-monitor-hostname(s)}"
+			}
+		}
+	}
+	
+Advanced users (i.e., developers and QA) may also add ``"ceph_branch": "{branch}"``
+to ``default-attributes``, replacing ``{branch}`` with the name of the branch you
+wish to use (e.g., ``master``). 
+
+Configure the Roles
+-------------------
+
+Navigate to the Ceph cookbooks directory. :: 
+
+	cd ~/chef-cookbooks/ceph
+	
+Create roles for OSDs, monitors, metadata servers, and RADOS Gateways from
+their respective role files. ::
+
+	knife role from file roles/ceph-osd.rb
+	knife role from file roles/ceph-mon.rb
+	knife role from file roles/ceph-mds.rb
+	knife role from file roles/ceph-radosgw.rb
+
+Configure Nodes
+---------------
+
+You must configure each node you intend to include in your Ceph cluster. 
+Identify nodes for your Ceph cluster. ::
+
+	knife node list
+	
+.. note: for each host where you installed Chef and executed ``chef-client``, 
+   the Chef server should have a minimal node configuration. You can create
+   additional nodes with ``knife node create {node-name}``.
+
+For each node you intend to use in your Ceph cluster, configure the node 
+as follows:: 
+
+	knife node edit {node-name}
+
+The node configuration should appear in your text editor. Change the 
+``chef_environment`` value to ``Ceph`` (or whatever name you set for your
+Ceph environment). 
+
+In the ``run_list``, add ``"recipe[ceph::apt]",`` to all nodes as 
+the first setting, so that Chef can install or update the necessary packages. 
+Then, add at least one of:: 
+
+	"role[ceph-mon]"
+	"role[ceph-osd]"
+	"role[ceph-mds]"
+	"role[ceph-radosgw]"
+
+If you add more than one role, separate them with a comma. Replace the 
+``{hostname}`` setting of the ``name`` key to the host name for the node. ::
+
+	{
+  		"chef_environment": "Ceph",
+  		"name": "{hostname}",
+  		"normal": {
+    		"tags": [
+
+    		]
+  		},
+ 		 "run_list": [
+			"recipe[ceph::apt]",
+			"role[ceph-mon]",
+			"role[ceph-mds]"
+  		]
+	}
+
+Prepare OSD Disks
+-----------------
+
+For the Ceph 0.48 Argonaut release, install ``gdisk`` and configure the OSD
+hard disks for use with Ceph. Replace ``{fsid}`` with the UUID you generated
+while using ``uuidgen -r``. 
+
+.. important: This procedure will erase all information in ``/dev/{disk}``.
+
+:: 
+
+	sudo apt-get install gdisk
+	sudo sgdisk /dev/{disk} --zap-all --clear --mbrtogpt --largest-new=1 --change-name=1:'ceph data' --typecode=1:{fsid}
+
+Create a file system and allocate the disk to your cluster. Specify a 
+filesystem (e.g., ``ext4``, ``xfs``, ``btrfs``). When you execute 
+``ceph-disk-prepare``, remember to replace ``{fsid}`` with the UUID you 
+generated while using ``uuidgen -r``::
+
+	sudo mkfs -t ext4 /dev/{disk}
+	sudo mount -o user_xattr /dev/{disk} /mnt
+	sudo ceph-disk-prepare --cluster-uuid={fsid} /mnt
+	sudo umount /mnt
+
+Finally, simulate a hotplug event. :: 
+
+	sudo udevadm trigger --subsystem-match=block --action=add
+	
+
+Run ``chef-client`` on each Node
+--------------------------------
+
+Once you have completed the preceding steps, you must run ``chef-client`` 
+on each node. For example::
+
+	sudo chef-client
 
 
-Create a role file for the Ceph monitor. :: 
+Proceed to Operating the Cluster
+--------------------------------
 
-	cat >ceph-mon.rb <<EOF
-	name "ceph-mon"
-	description "Ceph monitor server"
-	run_list(
-		'recipe[ceph::mon]'
-	)
-	EOF
-
-Create a role file for the OSDs. ::
-
-	cat >ceph-osd.rb <<EOF
-	name "ceph-osd"
-	description "Ceph object store"
-	run_list(
-		'recipe[ceph::bootstrap_osd]'
-	)
-	EOF
-
-Add the roles to Chef using ``knife``. :: 
-
-	knife role from file ceph-mon.rb ceph-osd.rb
-
-You may also perform the same tasks with the command line and a ``vim`` editor.
-Set an ``EDITOR`` environment variable. :: 
-
-	export EDITOR=vi
-
-Then exectute:: 
-
-	knife create role {rolename}
-
-The ``vim`` editor opens with a JSON object, and you may edit the settings and
-save the JSON file.
-
-Finally configure the nodes. ::
-
-	knife node edit {nodename}
-
-
+Once you complete the deployment, you may begin operating your cluster.
+See `Operating a Cluster`_ for details.
 
 
 .. _Managing Cookbooks with Knife: http://wiki.opscode.com/display/chef/Managing+Cookbooks+With+Knife
+.. _Installing Chef: ../../install/chef
+.. _Operating a Cluster: ../../init/

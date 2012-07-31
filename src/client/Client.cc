@@ -232,18 +232,24 @@ inodeno_t Client::get_root_ino()
 
 // debug crapola
 
-void Client::dump_inode(Inode *in, set<Inode*>& did)
+void Client::dump_inode(Inode *in, set<Inode*>& did, bool disconnected)
 {
-  ldout(cct, 1) << "dump_inode: inode " << in->ino << " ref " << in->get_num_ref() << " dir " << in->dir << dendl;
-
+  filepath path;
+  in->make_long_path(path);
+  ldout(cct, 1) << "dump_inode: "
+		<< (disconnected ? "DISCONNECTED ":"")
+		<< "inode " << in->ino
+		<< " " << path
+		<< " ref " << in->get_num_ref()
+		<< *in << dendl;
+  did.insert(in);
   if (in->dir) {
-    ldout(cct, 1) << "  dir size " << in->dir->dentries.size() << dendl;
-    //for (hash_map<const char*, Dentry*, hash<const char*>, eqstr>::iterator it = in->dir->dentries.begin();
+    ldout(cct, 1) << "  dir " << in->dir << " size " << in->dir->dentries.size() << dendl;
     for (hash_map<string, Dentry*>::iterator it = in->dir->dentries.begin();
          it != in->dir->dentries.end();
          it++) {
-      ldout(cct, 1) << "    dn " << it->first << " ref " << it->second->ref << dendl;
-      dump_inode(it->second->inode, did);
+      ldout(cct, 1) << "   " << in->ino << " dn " << it->first << " " << it->second << " ref " << it->second->ref << dendl;
+      dump_inode(it->second->inode, did, false);
     }
   }
 }
@@ -252,22 +258,19 @@ void Client::dump_cache()
 {
   set<Inode*> did;
 
-  if (root) dump_inode(root, did);
+  ldout(cct, 1) << "dump_cache" << dendl;
 
+  if (root)
+    dump_inode(root, did, true);
+
+  // make a second pass to catch anything disconnected
   for (hash_map<vinodeno_t, Inode*>::iterator it = inode_map.begin();
        it != inode_map.end();
        it++) {
-    if (did.count(it->second)) continue;
-    
-    ldout(cct, 1) << "dump_cache: inode " << it->first
-		  << " ref " << it->second->get_num_ref()
-		  << " dir " << it->second->dir
-		  << " " << *it->second << dendl;
-    if (it->second->dir) {
-      ldout(cct, 1) << "  dir size " << it->second->dir->dentries.size() << dendl;
-    }
+    if (did.count(it->second))
+      continue;
+    dump_inode(it->second, did, true);
   }
- 
 }
 
 int Client::init() 
@@ -1475,7 +1478,7 @@ void Client::handle_client_reply(MClientReply *reply)
 
 bool Client::ms_dispatch(Message *m)
 {
-  client_lock.Lock();
+  Mutex::Locker l(client_lock);
   if (!initialized) {
     ldout(cct, 10) << "inactive, discarding " << *m << dendl;
     m->put();
@@ -1539,8 +1542,6 @@ bool Client::ms_dispatch(Message *m)
       dump_cache();      
     }
   }
-
-  client_lock.Unlock();
 
   return true;
 }
@@ -4192,6 +4193,8 @@ void Client::_closedir(dir_result_t *dirp)
 
 void Client::rewinddir(dir_result_t *dirp)
 {
+  Mutex::Locker lock(client_lock);
+
   ldout(cct, 3) << "rewinddir(" << dirp << ")" << dendl;
   dir_result_t *d = (dir_result_t*)dirp;
   _readdir_drop_dirp_buffer(d);
@@ -4207,6 +4210,8 @@ loff_t Client::telldir(dir_result_t *dirp)
 
 void Client::seekdir(dir_result_t *dirp, loff_t offset)
 {
+  Mutex::Locker lock(client_lock);
+
   ldout(cct, 3) << "seekdir(" << dirp << ", " << offset << ")" << dendl;
   dir_result_t *d = (dir_result_t*)dirp;
 
@@ -4361,6 +4366,7 @@ int Client::_readdir_get_frag(dir_result_t *dirp)
 
 int Client::_readdir_cache_cb(dir_result_t *dirp, add_dirent_cb_t cb, void *p)
 {
+  assert(client_lock.is_locked());
   ldout(cct, 10) << "_readdir_cache_cb " << dirp << " on " << dirp->inode->ino
 	   << " at_cache_name " << dirp->at_cache_name << " offset " << hex << dirp->offset << dec
 	   << dendl;
@@ -4401,7 +4407,9 @@ int Client::_readdir_cache_cb(dir_result_t *dirp, add_dirent_cb_t cb, void *p)
     if (pd == dir->dentry_map.end())
       next_off = dir_result_t::END;
 
+    client_lock.Unlock();
     int r = cb(p, &de, &st, stmask, next_off);  // _next_ offset
+    client_lock.Lock();
     ldout(cct, 15) << " de " << de.d_name << " off " << hex << dn->offset << dec
 	     << " = " << r
 	     << dendl;
@@ -4422,6 +4430,8 @@ int Client::_readdir_cache_cb(dir_result_t *dirp, add_dirent_cb_t cb, void *p)
 
 int Client::readdir_r_cb(dir_result_t *d, add_dirent_cb_t cb, void *p)
 {
+  Mutex::Locker lock(client_lock);
+
   dir_result_t *dirp = (dir_result_t*)d;
 
   ldout(cct, 10) << "readdir_r_cb " << *dirp->inode << " offset " << hex << dirp->offset << dec
@@ -4451,7 +4461,9 @@ int Client::readdir_r_cb(dir_result_t *d, add_dirent_cb_t cb, void *p)
 
     fill_stat(diri, &st);
 
+    client_lock.Unlock();
     int r = cb(p, &de, &st, -1, next_off);
+    client_lock.Lock();
     if (r < 0)
       return r;
 
@@ -4466,7 +4478,9 @@ int Client::readdir_r_cb(dir_result_t *d, add_dirent_cb_t cb, void *p)
 
     fill_stat(in, &st);
 
+    client_lock.Unlock();
     int r = cb(p, &de, &st, -1, 2);
+    client_lock.Lock();
     if (r < 0)
       return r;
 
@@ -4497,7 +4511,6 @@ int Client::readdir_r_cb(dir_result_t *d, add_dirent_cb_t cb, void *p)
       return 0;
 
     if (dirp->buffer_frag != dirp->frag() || dirp->buffer == NULL) {
-      Mutex::Locker lock(client_lock);
       int r = _readdir_get_frag(dirp);
       if (r)
 	return r;
@@ -4514,7 +4527,9 @@ int Client::readdir_r_cb(dir_result_t *d, add_dirent_cb_t cb, void *p)
       int stmask = fill_stat(ent.second, &st);  
       fill_dirent(&de, ent.first.c_str(), st.st_mode, st.st_ino, dirp->offset + 1);
       
+      client_lock.Unlock();
       int r = cb(p, &de, &st, stmask, dirp->offset + 1);  // _next_ offset
+      client_lock.Lock();
       ldout(cct, 15) << " de " << de.d_name << " off " << hex << dirp->offset << dec
 	       << " = " << r
 	       << dendl;
@@ -5145,8 +5160,12 @@ int Client::_read_async(Fh *f, uint64_t off, uint64_t len, bufferlist *bl)
   r = objectcacher->file_read(&in->oset, &in->layout, in->snapid,
                               off, len, bl, 0, onfinish);
   if (r == 0) {
+    client_lock.Unlock();
+    flock.Lock();
     while (!done) 
-      cond.Wait(client_lock);
+      cond.Wait(flock);
+    flock.Unlock();
+    client_lock.Lock();
     r = rvalue;
   } else {
     // it was cached.
@@ -5177,8 +5196,12 @@ int Client::_read_sync(Fh *f, uint64_t off, uint64_t len, bufferlist *bl)
 		      pos, left, &tbl, 0,
 		      in->truncate_size, in->truncate_seq,
 		      onfinish);
+    client_lock.Unlock();
+    flock.Lock();
     while (!done)
-      cond.Wait(client_lock);
+      cond.Wait(flock);
+    flock.Unlock();
+    client_lock.Lock();
 
     if (r < 0)
       return r;
@@ -5344,8 +5367,12 @@ int Client::_write(Fh *f, int64_t offset, uint64_t size, const char *buf)
 		       in->truncate_size, in->truncate_seq,
 		       onfinish, onsafe);
     
+    client_lock.Unlock();
+    flock.Lock();
     while (!done)
-      cond.Wait(client_lock);
+      cond.Wait(flock);
+    flock.Unlock();
+    client_lock.Lock();
   }
 
   // time
