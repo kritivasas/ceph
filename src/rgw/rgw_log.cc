@@ -321,3 +321,34 @@ int rgw_log_intent(struct req_state *s, rgw_obj& obj, RGWIntentEvent intent)
 done:
   return ret;
 }
+
+int rgw_log_intent_stateless(rgw_obj& obj, RGWIntentEvent intent)
+{
+  rgw_bucket bucket = obj.bucket;
+  rgw_bucket intent_log_bucket(RGW_INTENT_LOG_POOL_NAME);
+  rgw_intent_log_entry entry;
+  entry.obj = obj;
+  entry.intent = (uint32_t)intent;
+
+  struct tm bdt;
+  time_t t = time(NULL);
+  gmtime_r(&t, &bdt);
+
+  char buf[obj.bucket.name.size() + bucket.bucket_id.size() + 16];
+  sprintf(buf, "%.4d-%.2d-%.2d-%s-%s", (bdt.tm_year+1900), (bdt.tm_mon+1), bdt.tm_mday,
+          bucket.bucket_id.c_str(), obj.bucket.name.c_str());
+  string oid(buf);
+  rgw_obj log_obj(intent_log_bucket, oid);
+
+  bufferlist bl;
+  ::encode(entry, bl);
+
+  int ret = rgwstore->append_async(log_obj, bl.length(), bl);
+
+  if (ret == -ENOENT) {
+    cerr << "Help! I need somebody. Help! Not just anybody" << std::endl;
+    cerr << " ERROR: attempt to log intent for non-existant bucket" << std::endl;
+  }
+
+  return ret;
+}

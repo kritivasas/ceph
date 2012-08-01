@@ -119,6 +119,7 @@ WRITE_CLASS_ENCODER(rgw_intent_log_entry)
 
 int rgw_log_op(struct req_state *s);
 int rgw_log_intent(struct req_state *s, rgw_obj& obj, RGWIntentEvent intent);
+int rgw_log_intent_stateless(rgw_obj& obj, RGWIntentEvent intent);
 void rgw_log_usage_init(CephContext *cct);
 void rgw_log_usage_finalize();
 
