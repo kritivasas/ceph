@@ -1724,6 +1724,21 @@ done:
   send_response();
 }
 
+int RGWDeleteMultObj::verify_permission()
+{
+  if (!verify_bucket_permission(s, RGW_PERM_WRITE))
+    return -EACCES;
+
+  return 0;
+}
+
+void RGWDeleteMultObj::execute()
+{
+  ret = get_params();
+
+  ldout(s->cct, 10) << "Hello world! " << dendl;
+}
+
 int RGWHandler::init(struct req_state *_s, FCGX_Request *fcgx)
 {
   s = _s;

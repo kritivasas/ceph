@@ -149,6 +149,15 @@ public:
   void send_response();
 };
 
+class RGWDeleteMultObj_REST_S3 : public RGWDeleteMultObj_REST {
+public:
+  RGWDeleteMultObj_REST_S3() {}
+  ~RGWDeleteMultObj_REST_S3() {}
+
+  void send_response();
+};
+
+
 class RGWHandler_REST_S3 : public RGWHandler_REST {
 protected:
   bool is_acl_op() {

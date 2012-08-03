@@ -665,6 +665,30 @@ public:
   virtual const char *name() { return "list_bucket_multiparts"; }
 };
 
+class RGWDeleteMultObj : public RGWOp {
+protected:
+  int ret;
+  size_t len;
+  char *data;
+
+public:
+  RGWDeleteMultObj() {}
+
+  virtual void init(struct req_state *s, RGWHandler *h) {
+    RGWOp::init(s, h);
+    ret = 0;
+    len = 0;
+    data = NULL;
+  }
+  int verify_permission(); // clearly we will want to fix this
+  void execute(); // clearly we will want to fix this
+
+  virtual int get_params() = 0;
+  //virtual void send_response() = 0;
+  virtual const char *name() { return "multi_object_delete"; }
+};
+
+
 class RGWHandler {
 protected:
   struct req_state *s;

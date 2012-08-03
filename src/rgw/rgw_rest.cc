@@ -411,6 +411,17 @@ int RGWListBucketMultiparts_REST::get_params()
   return 0;
 }
 
+int RGWDeleteMultObj_REST::get_params()
+{
+  size_t found;
+  found = s->decoded_uri.find("delete");
+
+  if (found != string::npos)
+    return 0;
+  else
+    return -1;
+}
+
 static void next_tok(string& str, string& tok, char delim)
 {
   if (str.size() == 0) {
@@ -866,6 +877,11 @@ int RGWHandler_REST::read_permissions(RGWOp *op_obj)
     break;
   case OP_PUT:
   case OP_POST:
+    /* is it a 'multi-object delete' request? */
+    if (s->request_params == "delete") {
+      only_bucket = true;
+      break;
+    }
     if (is_obj_update_op()) {
       only_bucket = false;
       break;

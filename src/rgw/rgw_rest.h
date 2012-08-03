@@ -141,6 +141,14 @@ public:
   int get_params();
 };
 
+class RGWDeleteMultObj_REST : public RGWDeleteMultObj {
+public:
+  RGWDeleteMultObj_REST() {}
+  ~RGWDeleteMultObj_REST() {}
+
+  int get_params();
+};
+
 class RGWHandler_REST : public RGWHandler {
 protected:
   virtual bool is_acl_op() = 0;

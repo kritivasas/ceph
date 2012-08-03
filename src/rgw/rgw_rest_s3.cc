@@ -654,6 +654,9 @@ RGWOp *RGWHandler_REST_S3::get_post_op()
     else
       return new RGWInitMultipart_REST_S3;
   }
+  else if ( s->request_params == "delete" ) {
+    return new RGWDeleteMultObj_REST_S3;
+  }
 
   return NULL;
 }
